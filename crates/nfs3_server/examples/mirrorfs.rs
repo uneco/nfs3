@@ -16,6 +16,7 @@ use nfs3_server::fs_util::{
 use nfs3_server::nfs3_types::nfs3::{
     cookie3, createverf3, fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, sattr3,
 };
+use nfs3_server::nfs3_types::rpc::auth_unix;
 use nfs3_server::tcp::{NFSTcp, NFSTcpListener};
 use nfs3_server::vfs::{
     DirEntryPlus, FileHandleU64, NextResult, NfsFileSystem, NfsReadFileSystem, ReadDirPlusIterator,
@@ -387,6 +388,7 @@ impl NfsReadFileSystem for MirrorFs {
         &self,
         dirid: &Self::Handle,
         filename: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<Self::Handle, nfsstat3> {
         let dirid = dirid.as_u64();
         let mut fsmap = self.fsmap.write().await;
@@ -417,7 +419,7 @@ impl NfsReadFileSystem for MirrorFs {
             .map(FileHandleU64::new)
     }
 
-    async fn getattr(&self, id: &Self::Handle) -> Result<fattr3, nfsstat3> {
+    async fn getattr(&self, id: &Self::Handle, _auth: &auth_unix) -> Result<fattr3, nfsstat3> {
         let id = id.as_u64();
         let mut fsmap = self.fsmap.write().await;
         if matches!(fsmap.refresh_entry(id).await?, RefreshResult::Delete) {
@@ -435,6 +437,7 @@ impl NfsReadFileSystem for MirrorFs {
         id: &Self::Handle,
         offset: u64,
         count: u32,
+        _auth: &auth_unix,
     ) -> Result<(Vec<u8>, bool), nfsstat3> {
         let id = id.as_u64();
         let fsmap = self.fsmap.read().await;
@@ -464,6 +467,7 @@ impl NfsReadFileSystem for MirrorFs {
         &self,
         dirid: &Self::Handle,
         start_after: cookie3,
+        _auth: &auth_unix,
     ) -> Result<impl ReadDirPlusIterator<Self::Handle>, nfsstat3> {
         let dirid = dirid.as_u64();
         let fsmap = Arc::clone(&self.fsmap);
@@ -471,7 +475,11 @@ impl NfsReadFileSystem for MirrorFs {
         Ok(iter)
     }
 
-    async fn readlink(&self, id: &Self::Handle) -> Result<nfspath3<'_>, nfsstat3> {
+    async fn readlink(
+        &self,
+        id: &Self::Handle,
+        _auth: &auth_unix,
+    ) -> Result<nfspath3<'_>, nfsstat3> {
         let id = id.as_u64();
         let fsmap = self.fsmap.read().await;
         let ent = fsmap.find_entry(id)?;
@@ -489,7 +497,12 @@ impl NfsReadFileSystem for MirrorFs {
 }
 
 impl NfsFileSystem for MirrorFs {
-    async fn setattr(&self, id: &Self::Handle, setattr: sattr3) -> Result<fattr3, nfsstat3> {
+    async fn setattr(
+        &self,
+        id: &Self::Handle,
+        setattr: sattr3,
+        _auth: &auth_unix,
+    ) -> Result<fattr3, nfsstat3> {
         let id = id.as_u64();
         let mut fsmap = self.fsmap.write().await;
         let entry = fsmap.find_entry(id)?;
@@ -503,7 +516,13 @@ impl NfsFileSystem for MirrorFs {
         }
         Ok(metadata_to_fattr3(id, &metadata))
     }
-    async fn write(&self, id: &Self::Handle, offset: u64, data: &[u8]) -> Result<fattr3, nfsstat3> {
+    async fn write(
+        &self,
+        id: &Self::Handle,
+        offset: u64,
+        data: &[u8],
+        _auth: &auth_unix,
+    ) -> Result<fattr3, nfsstat3> {
         let id = id.as_u64();
         let fsmap = self.fsmap.read().await;
         let ent = fsmap.find_entry(id)?;
@@ -540,6 +559,7 @@ impl NfsFileSystem for MirrorFs {
         dirid: &Self::Handle,
         filename: &filename3<'_>,
         setattr: sattr3,
+        _auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         self.create_fs_object(dirid.as_u64(), filename, &CreateFSObject::File(setattr))
             .await
@@ -551,6 +571,7 @@ impl NfsFileSystem for MirrorFs {
         dirid: &Self::Handle,
         filename: &filename3<'_>,
         _createverf: createverf3,
+        _auth: &auth_unix,
     ) -> Result<Self::Handle, nfsstat3> {
         let id = self
             .create_fs_object(dirid.as_u64(), filename, &CreateFSObject::Exclusive)
@@ -559,7 +580,12 @@ impl NfsFileSystem for MirrorFs {
         Ok(FileHandleU64::new(id))
     }
 
-    async fn remove(&self, dirid: &Self::Handle, filename: &filename3<'_>) -> Result<(), nfsstat3> {
+    async fn remove(
+        &self,
+        dirid: &Self::Handle,
+        filename: &filename3<'_>,
+        _auth: &auth_unix,
+    ) -> Result<(), nfsstat3> {
         let dirid = dirid.as_u64();
         let mut fsmap = self.fsmap.write().await;
         let ent = fsmap.find_entry(dirid)?;
@@ -610,6 +636,7 @@ impl NfsFileSystem for MirrorFs {
         from_filename: &filename3<'_>,
         to_dirid: &Self::Handle,
         to_filename: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<(), nfsstat3> {
         let from_dirid = from_dirid.as_u64();
         let to_dirid = to_dirid.as_u64();
@@ -691,6 +718,7 @@ impl NfsFileSystem for MirrorFs {
         &self,
         dirid: &Self::Handle,
         dirname: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         self.create_fs_object(dirid.as_u64(), dirname, &CreateFSObject::Directory)
             .await
@@ -703,6 +731,7 @@ impl NfsFileSystem for MirrorFs {
         linkname: &filename3<'a>,
         symlink: &nfspath3<'a>,
         attr: &sattr3,
+        _auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         self.create_fs_object(
             dirid.as_u64(),

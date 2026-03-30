@@ -41,6 +41,8 @@ use nfs3_types::nfs3::{
 };
 use nfs3_types::xdr_codec::Opaque;
 
+use nfs3_types::rpc::auth_unix;
+
 use crate::vfs::{
     DirEntry, DirEntryPlus, FileHandleU64, NextResult, NfsFileSystem, NfsReadFileSystem,
     ReadDirIterator, ReadDirPlusIterator,
@@ -694,12 +696,13 @@ impl NfsReadFileSystem for MemFs {
         &self,
         dirid: &FileHandleU64,
         filename: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<FileHandleU64, nfsstat3> {
         let fs = self.fs.read().expect("lock is poisoned");
         fs.lookup(*dirid, filename).map(Entry::fileid)
     }
 
-    async fn getattr(&self, id: &FileHandleU64) -> Result<fattr3, nfsstat3> {
+    async fn getattr(&self, id: &FileHandleU64, _auth: &auth_unix) -> Result<fattr3, nfsstat3> {
         let fs = self.fs.read().expect("lock is poisoned");
         let entry = fs.get(*id).ok_or(nfsstat3::NFS3ERR_NOENT)?;
         Ok(entry.attr().clone())
@@ -710,6 +713,7 @@ impl NfsReadFileSystem for MemFs {
         id: &FileHandleU64,
         offset: u64,
         count: u32,
+        _auth: &auth_unix,
     ) -> Result<(Vec<u8>, bool), nfsstat3> {
         let fs = self.fs.read().expect("lock is poisoned");
         let entry = fs.get(*id).ok_or(nfsstat3::NFS3ERR_NOENT)?;
@@ -721,6 +725,7 @@ impl NfsReadFileSystem for MemFs {
         &self,
         dirid: &FileHandleU64,
         cookie: u64,
+        _auth: &auth_unix,
     ) -> Result<impl ReadDirIterator, nfsstat3> {
         let iter = Self::make_iter(self, *dirid, cookie)?;
         Ok(iter)
@@ -730,23 +735,37 @@ impl NfsReadFileSystem for MemFs {
         &self,
         dirid: &FileHandleU64,
         cookie: u64,
+        _auth: &auth_unix,
     ) -> Result<impl ReadDirPlusIterator<FileHandleU64>, nfsstat3> {
         let iter = Self::make_iter(self, *dirid, cookie)?;
         Ok(iter)
     }
 
-    async fn readlink(&self, _id: &FileHandleU64) -> Result<nfspath3<'_>, nfsstat3> {
+    async fn readlink(
+        &self,
+        _id: &FileHandleU64,
+        _auth: &auth_unix,
+    ) -> Result<nfspath3<'_>, nfsstat3> {
         tracing::warn!("readlink not implemented");
         Err(nfsstat3::NFS3ERR_NOTSUPP)
     }
 
-    async fn lookup_by_path(&self, path: &str) -> Result<FileHandleU64, nfsstat3> {
+    async fn lookup_by_path(
+        &self,
+        path: &str,
+        _auth: &auth_unix,
+    ) -> Result<FileHandleU64, nfsstat3> {
         self.path_to_id_impl(path)
     }
 }
 
 impl NfsFileSystem for MemFs {
-    async fn setattr(&self, id: &FileHandleU64, setattr: sattr3) -> Result<fattr3, nfsstat3> {
+    async fn setattr(
+        &self,
+        id: &FileHandleU64,
+        setattr: sattr3,
+        _auth: &auth_unix,
+    ) -> Result<fattr3, nfsstat3> {
         let mut fs = self.fs.write().expect("lock is poisoned");
         let entry = fs.get_mut(*id).ok_or(nfsstat3::NFS3ERR_NOENT)?;
         entry.set_attr(&setattr);
@@ -758,6 +777,7 @@ impl NfsFileSystem for MemFs {
         id: &FileHandleU64,
         offset: u64,
         data: &[u8],
+        _auth: &auth_unix,
     ) -> Result<fattr3, nfsstat3> {
         let mut fs = self.fs.write().expect("lock is poisoned");
 
@@ -771,6 +791,7 @@ impl NfsFileSystem for MemFs {
         dirid: &FileHandleU64,
         filename: &filename3<'_>,
         attr: sattr3,
+        _auth: &auth_unix,
     ) -> Result<(FileHandleU64, fattr3), nfsstat3> {
         self.add_file(*dirid, filename.clone_to_owned(), &attr, Vec::new(), None)
     }
@@ -780,6 +801,7 @@ impl NfsFileSystem for MemFs {
         dirid: &FileHandleU64,
         filename: &filename3<'_>,
         createverf: nfs::createverf3,
+        _auth: &auth_unix,
     ) -> Result<FileHandleU64, nfsstat3> {
         self.add_file(
             *dirid,
@@ -795,6 +817,7 @@ impl NfsFileSystem for MemFs {
         &self,
         dirid: &FileHandleU64,
         dirname: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<(FileHandleU64, fattr3), nfsstat3> {
         self.add_dir(*dirid, dirname.clone_to_owned())
     }
@@ -803,6 +826,7 @@ impl NfsFileSystem for MemFs {
         &self,
         dirid: &FileHandleU64,
         filename: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<(), nfsstat3> {
         self.fs
             .write()
@@ -816,6 +840,7 @@ impl NfsFileSystem for MemFs {
         from_filename: &filename3<'a>,
         to_dirid: &FileHandleU64,
         to_filename: &filename3<'a>,
+        _auth: &auth_unix,
     ) -> Result<(), nfsstat3> {
         let mut fs = self.fs.write().expect("lock is poisoned");
         fs.rename(*from_dirid, from_filename, *to_dirid, to_filename)
@@ -827,6 +852,7 @@ impl NfsFileSystem for MemFs {
         _linkname: &filename3<'a>,
         _symlink: &nfspath3<'a>,
         _attr: &sattr3,
+        _auth: &auth_unix,
     ) -> Result<(FileHandleU64, fattr3), nfsstat3> {
         tracing::warn!("symlink not implemented");
         Err(nfsstat3::NFS3ERR_NOTSUPP)

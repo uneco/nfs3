@@ -13,6 +13,7 @@ use nfs3_server::nfs3_types::nfs3::{
     createverf3, fattr3, filename3, nfspath3, nfsstat3, sattr3, set_gid3, set_mode3, set_size3,
     set_uid3,
 };
+use nfs3_server::nfs3_types::rpc::auth_unix;
 use nfs3_server::vfs::{
     FileHandleU64, NfsFileSystem, NfsReadFileSystem, ReadDirIterator, ReadDirPlusIterator,
     VFSCapabilities,
@@ -145,11 +146,12 @@ impl NfsReadFileSystem for Fs {
         &self,
         dirid: &Self::Handle,
         filename: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<Self::Handle, nfsstat3> {
         self.cache.lookup_by_id(*dirid, filename.as_os_str(), true)
     }
 
-    async fn getattr(&self, id: &Self::Handle) -> Result<fattr3, nfsstat3> {
+    async fn getattr(&self, id: &Self::Handle, _auth: &auth_unix) -> Result<fattr3, nfsstat3> {
         let path = self.path(*id)?;
         let metadata = tokio::fs::symlink_metadata(&path)
             .await
@@ -163,6 +165,7 @@ impl NfsReadFileSystem for Fs {
         id: &Self::Handle,
         offset: u64,
         count: u32,
+        _auth: &auth_unix,
     ) -> Result<(Vec<u8>, bool), nfsstat3> {
         let path = self.path(*id)?;
         self.read(path, offset, count).await.map_err(map_io_error)
@@ -172,6 +175,7 @@ impl NfsReadFileSystem for Fs {
         &self,
         dirid: &Self::Handle,
         cookie: u64,
+        _auth: &auth_unix,
     ) -> Result<impl ReadDirIterator, nfsstat3> {
         self.get_or_create_iterator(*dirid, cookie).await
     }
@@ -180,11 +184,16 @@ impl NfsReadFileSystem for Fs {
         &self,
         dirid: &Self::Handle,
         cookie: u64,
+        _auth: &auth_unix,
     ) -> Result<impl ReadDirPlusIterator<Self::Handle>, nfsstat3> {
         self.get_or_create_iterator(*dirid, cookie).await
     }
 
-    async fn readlink(&self, id: &Self::Handle) -> Result<nfspath3<'_>, nfsstat3> {
+    async fn readlink(
+        &self,
+        id: &Self::Handle,
+        _auth: &auth_unix,
+    ) -> Result<nfspath3<'_>, nfsstat3> {
         let path = self.path(*id)?;
         match tokio::fs::read_link(&path).await {
             Ok(target) => Ok(FromOsString::from_os_str(target.as_os_str())),
@@ -221,13 +230,24 @@ impl NfsFileSystem for Fs {
         VFSCapabilities::ReadWrite
     }
 
-    async fn setattr(&self, id: &Self::Handle, setattr: sattr3) -> Result<fattr3, nfsstat3> {
+    async fn setattr(
+        &self,
+        id: &Self::Handle,
+        setattr: sattr3,
+        auth: &auth_unix,
+    ) -> Result<fattr3, nfsstat3> {
         let path = self.path(*id)?;
         nfs3_server::fs_util::path_setattr(&path, &setattr).await?;
-        self.getattr(id).await
+        self.getattr(id, auth).await
     }
 
-    async fn write(&self, id: &Self::Handle, offset: u64, data: &[u8]) -> Result<fattr3, nfsstat3> {
+    async fn write(
+        &self,
+        id: &Self::Handle,
+        offset: u64,
+        data: &[u8],
+        auth: &auth_unix,
+    ) -> Result<fattr3, nfsstat3> {
         let path = self.path(*id)?;
 
         // Check if it's a regular file
@@ -251,7 +271,7 @@ impl NfsFileSystem for Fs {
         .await
         .map_err(map_io_error)?;
 
-        self.getattr(id).await
+        self.getattr(id, auth).await
     }
 
     async fn create(
@@ -259,6 +279,7 @@ impl NfsFileSystem for Fs {
         dirid: &Self::Handle,
         filename: &filename3<'_>,
         attr: sattr3,
+        auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         let dir_path = self.path(*dirid)?;
         let file_path = dir_path.join(filename.as_os_str());
@@ -278,7 +299,7 @@ impl NfsFileSystem for Fs {
             .cache
             .lookup_by_id(*dirid, filename.as_os_str(), true)?;
 
-        let fattr = self.setattr(&file_id, attr).await?;
+        let fattr = self.setattr(&file_id, attr, auth).await?;
         Ok((file_id, fattr))
     }
 
@@ -287,6 +308,7 @@ impl NfsFileSystem for Fs {
         dirid: &Self::Handle,
         filename: &filename3<'_>,
         _createverf: createverf3,
+        _auth: &auth_unix,
     ) -> Result<Self::Handle, nfsstat3> {
         let dir_path = self.path(*dirid)?;
         let file_path = dir_path.join(filename.as_os_str());
@@ -311,6 +333,7 @@ impl NfsFileSystem for Fs {
         &self,
         dirid: &Self::Handle,
         dirname: &filename3<'_>,
+        auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         let dir_path = self.path(*dirid)?;
         let new_dir_path = dir_path.join(dirname.as_os_str());
@@ -323,11 +346,16 @@ impl NfsFileSystem for Fs {
         // Register the directory in the cache
         let new_dir_id = self.cache.lookup_by_id(*dirid, dirname.as_os_str(), true)?;
 
-        let fattr = self.getattr(&new_dir_id).await?;
+        let fattr = self.getattr(&new_dir_id, auth).await?;
         Ok((new_dir_id, fattr))
     }
 
-    async fn remove(&self, dirid: &Self::Handle, filename: &filename3<'_>) -> Result<(), nfsstat3> {
+    async fn remove(
+        &self,
+        dirid: &Self::Handle,
+        filename: &filename3<'_>,
+        _auth: &auth_unix,
+    ) -> Result<(), nfsstat3> {
         let dir_path = self.path(*dirid)?;
         let file_path = dir_path.join(filename.as_os_str());
 
@@ -350,6 +378,7 @@ impl NfsFileSystem for Fs {
         from_filename: &filename3<'a>,
         to_dirid: &Self::Handle,
         to_filename: &filename3<'a>,
+        _auth: &auth_unix,
     ) -> Result<(), nfsstat3> {
         // Validate filenames - "." and ".." are not allowed
         let from_name = from_filename.as_os_str();
@@ -413,6 +442,7 @@ impl NfsFileSystem for Fs {
         linkname: &filename3<'a>,
         symlink: &nfspath3<'a>,
         attr: &sattr3,
+        auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         let dir_path = self.path(*dirid)?;
         let link_path = dir_path.join(linkname.as_os_str());
@@ -446,16 +476,17 @@ impl NfsFileSystem for Fs {
         {
             // Note: Setting attributes on symlinks is tricky, many systems don't support it
             // We'll try but ignore errors
-            let _ = self.setattr(&link_id, attr.clone()).await;
+            let _ = self.setattr(&link_id, attr.clone(), auth).await;
         }
 
-        let fattr = self.getattr(&link_id).await?;
+        let fattr = self.getattr(&link_id, auth).await?;
         Ok((link_id, fattr))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use nfs3_server::nfs3_types::rpc::auth_unix;
     use nfs3_server::vfs::{NextResult, ReadDirIterator};
     use tempfile::tempdir;
     use tokio::fs;
@@ -479,11 +510,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_cookie_validation_in_readdir() {
+        let auth = auth_unix::default();
         let (_temp_dir, fs, root_handle) =
             create_test_fs_with_files(&["file1.txt", "file2.txt", "file3.txt"]).await;
 
         let mut iter1 = fs
-            .readdir(&root_handle, 0)
+            .readdir(&root_handle, 0, &auth)
             .await
             .expect("failed to create iterator");
 
@@ -503,7 +535,7 @@ mod tests {
         if entries.len() > 1 {
             let cookie_from_consumed_iter = entries[0].cookie;
             assert!(
-                fs.readdir(&root_handle, cookie_from_consumed_iter)
+                fs.readdir(&root_handle, cookie_from_consumed_iter, &auth)
                     .await
                     .is_err(),
                 "Should fail with BAD_COOKIE for consumed iterator cookie"
@@ -511,7 +543,7 @@ mod tests {
         }
 
         let mut iter_partial = fs
-            .readdir(&root_handle, 0)
+            .readdir(&root_handle, 0, &auth)
             .await
             .expect("failed to create iterator");
         let first_entry = match iter_partial.next().await {
@@ -524,7 +556,7 @@ mod tests {
         drop(iter_partial);
 
         let mut iter2 = fs
-            .readdir(&root_handle, resume_cookie)
+            .readdir(&root_handle, resume_cookie, &auth)
             .await
             .expect("Should succeed with cached cookie");
         match iter2.next().await {
@@ -534,13 +566,16 @@ mod tests {
 
         let invalid_cookie = 999_999;
         assert!(
-            fs.readdir(&root_handle, invalid_cookie).await.is_err(),
+            fs.readdir(&root_handle, invalid_cookie, &auth)
+                .await
+                .is_err(),
             "Should fail with BAD_COOKIE for invalid cookie"
         );
     }
 
     #[tokio::test]
     async fn test_streaming_iteration() {
+        let auth = auth_unix::default();
         let (_temp_dir, fs, root_handle) = create_test_fs_with_files(&[
             "stream_file1.txt",
             "stream_file2.txt",
@@ -549,7 +584,7 @@ mod tests {
         .await;
 
         let mut iter = fs
-            .readdir(&root_handle, 0)
+            .readdir(&root_handle, 0, &auth)
             .await
             .expect("failed to create iterator");
         let mut entries = Vec::new();
@@ -565,7 +600,7 @@ mod tests {
         assert!(!entries.is_empty(), "Should have streamed some entries");
 
         let mut iter2 = fs
-            .readdir(&root_handle, 0)
+            .readdir(&root_handle, 0, &auth)
             .await
             .expect("failed to create iterator");
         let mut entries2 = Vec::new();
@@ -583,6 +618,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cookie_uniqueness() {
+        let auth = auth_unix::default();
         let (_temp_dir, fs, root_handle) =
             create_test_fs_with_files(&["unique_file1.txt", "unique_file2.txt"]).await;
 
@@ -591,7 +627,7 @@ mod tests {
         for i in 0..3 {
             println!("Testing iterator {i}");
             let mut iter = fs
-                .readdir(&root_handle, 0)
+                .readdir(&root_handle, 0, &auth)
                 .await
                 .expect("failed to create iterator");
 

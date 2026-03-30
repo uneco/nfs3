@@ -32,6 +32,7 @@ use crate::nfs3_types::nfs3::{
     FSF3_CANSETTIME, FSF3_HOMOGENEOUS, FSF3_SYMLINK, FSINFO3resok as fsinfo3, createverf3, fattr3,
     filename3, nfspath3, nfsstat3, nfstime3, post_op_attr, sattr3,
 };
+use crate::nfs3_types::rpc::auth_unix;
 use crate::units::{GIBIBYTE, MEBIBYTE};
 use crate::vfs::adapters::ReadDirPlusToReadDir;
 
@@ -67,6 +68,7 @@ pub trait NfsReadFileSystem: Send + Sync {
         &self,
         dirid: &Self::Handle,
         filename: &filename3<'_>,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<Self::Handle, nfsstat3>> + Send;
 
     /// This method is used when the client tries to mount a subdirectory.
@@ -74,6 +76,7 @@ pub trait NfsReadFileSystem: Send + Sync {
     fn lookup_by_path(
         &self,
         path: &str,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<Self::Handle, nfsstat3>> + Send {
         async move {
             let splits = path.split('/');
@@ -82,7 +85,9 @@ pub trait NfsReadFileSystem: Send + Sync {
                 if component.is_empty() {
                     continue;
                 }
-                fid = self.lookup(&fid, &component.as_bytes().into()).await?;
+                fid = self
+                    .lookup(&fid, &component.as_bytes().into(), auth)
+                    .await?;
             }
             Ok(fid)
         }
@@ -90,7 +95,11 @@ pub trait NfsReadFileSystem: Send + Sync {
 
     /// Returns the attributes of an id.
     /// This method should be fast as it is used very frequently.
-    fn getattr(&self, id: &Self::Handle) -> impl Future<Output = Result<fattr3, nfsstat3>> + Send;
+    fn getattr(
+        &self,
+        id: &Self::Handle,
+        auth: &auth_unix,
+    ) -> impl Future<Output = Result<fattr3, nfsstat3>> + Send;
 
     /// Reads the contents of a file returning (bytes, EOF)
     /// Note that offset/count may go past the end of the file and that
@@ -101,6 +110,7 @@ pub trait NfsReadFileSystem: Send + Sync {
         id: &Self::Handle,
         offset: u64,
         count: u32,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<(Vec<u8>, bool), nfsstat3>> + Send;
 
     /// Simple version of readdir. Only need to return filename and id
@@ -110,9 +120,10 @@ pub trait NfsReadFileSystem: Send + Sync {
         &self,
         dirid: &Self::Handle,
         cookie: u64,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<impl ReadDirIterator, nfsstat3>> + Send {
         async move {
-            self.readdirplus(dirid, cookie)
+            self.readdirplus(dirid, cookie, auth)
                 .await
                 .map(ReadDirPlusToReadDir::new)
         }
@@ -129,22 +140,25 @@ pub trait NfsReadFileSystem: Send + Sync {
         &self,
         dirid: &Self::Handle,
         cookie: u64,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<impl ReadDirPlusIterator<Self::Handle>, nfsstat3>> + Send;
 
     /// Reads a symlink
     fn readlink(
         &self,
         id: &Self::Handle,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<nfspath3<'_>, nfsstat3>> + Send;
 
     /// Get static file system Information
     fn fsinfo(
         &self,
         root_fileid: &Self::Handle,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<fsinfo3, nfsstat3>> + Send {
         async move {
             let dir_attr = self
-                .getattr(root_fileid)
+                .getattr(root_fileid, auth)
                 .await
                 .map_or(post_op_attr::None, post_op_attr::Some);
 
@@ -184,6 +198,7 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         &self,
         id: &Self::Handle,
         setattr: sattr3,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<fattr3, nfsstat3>> + Send;
 
     /// Writes the contents of a file returning (bytes, EOF)
@@ -203,6 +218,7 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         id: &Self::Handle,
         offset: u64,
         data: &[u8],
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<fattr3, nfsstat3>> + Send;
 
     /// Creates a file with the following attributes.
@@ -213,6 +229,7 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         dirid: &Self::Handle,
         filename: &filename3<'_>,
         attr: sattr3,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<(Self::Handle, fattr3), nfsstat3>> + Send;
 
     /// Creates a file if it does not already exist.
@@ -229,6 +246,7 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         dirid: &Self::Handle,
         filename: &filename3<'_>,
         createverf: createverf3,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<Self::Handle, nfsstat3>> + Send;
 
     /// Makes a directory with the following attributes.
@@ -238,6 +256,7 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         &self,
         dirid: &Self::Handle,
         dirname: &filename3<'_>,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<(Self::Handle, fattr3), nfsstat3>> + Send;
 
     /// Removes a file.
@@ -247,6 +266,7 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         &self,
         dirid: &Self::Handle,
         filename: &filename3<'_>,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<(), nfsstat3>> + Send;
 
     /// Removes a file.
@@ -269,6 +289,7 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         from_filename: &filename3<'a>,
         to_dirid: &Self::Handle,
         to_filename: &filename3<'a>,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<(), nfsstat3>> + Send;
 
     /// Makes a symlink with the following attributes.
@@ -280,5 +301,6 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         linkname: &filename3<'a>,
         symlink: &nfspath3<'a>,
         attr: &sattr3,
+        auth: &auth_unix,
     ) -> impl Future<Output = Result<(Self::Handle, fattr3), nfsstat3>> + Send;
 }

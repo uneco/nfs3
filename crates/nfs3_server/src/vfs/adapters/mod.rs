@@ -4,6 +4,7 @@ mod iterator;
 
 pub use iterator::ReadDirPlusToReadDir;
 use nfs3_types::nfs3::{fattr3, filename3, nfsstat3, sattr3};
+use nfs3_types::rpc::auth_unix;
 
 use super::{
     DirEntryPlus, NextResult, NfsFileSystem, NfsReadFileSystem, ReadDirIterator,
@@ -42,12 +43,13 @@ where
         &self,
         dirid: &Self::Handle,
         filename: &filename3<'_>,
+        auth: &auth_unix,
     ) -> Result<Self::Handle, nfsstat3> {
-        self.0.lookup(dirid, filename).await
+        self.0.lookup(dirid, filename, auth).await
     }
 
-    async fn getattr(&self, id: &Self::Handle) -> Result<fattr3, nfsstat3> {
-        let mut result = self.0.getattr(id).await;
+    async fn getattr(&self, id: &Self::Handle, auth: &auth_unix) -> Result<fattr3, nfsstat3> {
+        let mut result = self.0.getattr(id, auth).await;
         if let Ok(attr) = &mut result {
             remove_write_permissions(attr);
         }
@@ -59,25 +61,28 @@ where
         id: &Self::Handle,
         offset: u64,
         count: u32,
+        auth: &auth_unix,
     ) -> Result<(Vec<u8>, bool), nfsstat3> {
-        self.0.read(id, offset, count).await
+        self.0.read(id, offset, count, auth).await
     }
 
     async fn readdir(
         &self,
         dirid: &Self::Handle,
         cookie3: u64,
+        auth: &auth_unix,
     ) -> Result<impl ReadDirIterator, nfsstat3> {
-        self.0.readdir(dirid, cookie3).await
+        self.0.readdir(dirid, cookie3, auth).await
     }
 
     async fn readdirplus(
         &self,
         dirid: &Self::Handle,
         cookie3: u64,
+        auth: &auth_unix,
     ) -> Result<impl ReadDirPlusIterator<Self::Handle>, nfsstat3> {
         self.0
-            .readdirplus(dirid, cookie3)
+            .readdirplus(dirid, cookie3, auth)
             .await
             .map(ReadOnlyIterator)
     }
@@ -85,8 +90,9 @@ where
     async fn readlink(
         &self,
         id: &Self::Handle,
+        auth: &auth_unix,
     ) -> Result<nfs3_types::nfs3::nfspath3<'_>, nfsstat3> {
-        self.0.readlink(id).await
+        self.0.readlink(id, auth).await
     }
 }
 
@@ -98,7 +104,12 @@ where
         VFSCapabilities::ReadOnly
     }
 
-    async fn setattr(&self, _id: &Self::Handle, _setattr: sattr3) -> Result<fattr3, nfsstat3> {
+    async fn setattr(
+        &self,
+        _id: &Self::Handle,
+        _setattr: sattr3,
+        _auth: &auth_unix,
+    ) -> Result<fattr3, nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }
 
@@ -107,6 +118,7 @@ where
         _id: &Self::Handle,
         _offset: u64,
         _data: &[u8],
+        _auth: &auth_unix,
     ) -> Result<fattr3, nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }
@@ -116,6 +128,7 @@ where
         _dirid: &Self::Handle,
         _filename: &filename3<'_>,
         _attr: sattr3,
+        _auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }
@@ -125,6 +138,7 @@ where
         _dirid: &Self::Handle,
         _filename: &filename3<'_>,
         _createverf: nfs3_types::nfs3::createverf3,
+        _auth: &auth_unix,
     ) -> Result<Self::Handle, nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }
@@ -133,6 +147,7 @@ where
         &self,
         _dirid: &Self::Handle,
         _dirname: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }
@@ -141,6 +156,7 @@ where
         &self,
         _dirid: &Self::Handle,
         _filename: &filename3<'_>,
+        _auth: &auth_unix,
     ) -> Result<(), nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }
@@ -151,6 +167,7 @@ where
         _from_filename: &filename3<'a>,
         _to_dirid: &Self::Handle,
         _to_filename: &filename3<'a>,
+        _auth: &auth_unix,
     ) -> Result<(), nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }
@@ -161,6 +178,7 @@ where
         _linkname: &filename3<'a>,
         _symlink: &nfs3_types::nfs3::nfspath3<'a>,
         _attr: &sattr3,
+        _auth: &auth_unix,
     ) -> Result<(Self::Handle, fattr3), nfsstat3> {
         Err(nfsstat3::NFS3ERR_ROFS)
     }

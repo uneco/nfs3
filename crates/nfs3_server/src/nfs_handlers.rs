@@ -97,7 +97,7 @@ where
     let handle = getattr3args.object;
 
     let id = fh_to_id!(context, &handle);
-    match context.vfs.getattr(&id).await {
+    match context.vfs.getattr(&id, &context.auth).await {
         Ok(obj_attributes) => {
             debug!(" {xid} --> {obj_attributes:?}");
             GETATTR3res::Ok(GETATTR3resok { obj_attributes })
@@ -119,10 +119,15 @@ where
 {
     let dirops = lookup3args.what;
     let dirid = fh_to_id!(context, &dirops.dir);
-    let dir_attributes = nfs_option_from_result(context.vfs.getattr(&dirid).await);
-    match context.vfs.lookup(&dirid, &dirops.name).await {
+    let dir_attributes = nfs_option_from_result(context.vfs.getattr(&dirid, &context.auth).await);
+    match context
+        .vfs
+        .lookup(&dirid, &dirops.name, &context.auth)
+        .await
+    {
         Ok(fid) => {
-            let obj_attributes = nfs_option_from_result(context.vfs.getattr(&fid).await);
+            let obj_attributes =
+                nfs_option_from_result(context.vfs.getattr(&fid, &context.auth).await);
             debug!("lookup success {} --> {:?}", xid, obj_attributes);
             LOOKUP3res::Ok(LOOKUP3resok {
                 object: context.file_handle_converter.fh_to_nfs(&fid),
@@ -147,10 +152,10 @@ where
 {
     let handle = read3args.file;
     let id = fh_to_id!(context, &handle);
-    let file_attributes = nfs_option_from_result(context.vfs.getattr(&id).await);
+    let file_attributes = nfs_option_from_result(context.vfs.getattr(&id, &context.auth).await);
     match context
         .vfs
-        .read(&id, read3args.offset, read3args.count)
+        .read(&id, read3args.offset, read3args.count, &context.auth)
         .await
     {
         Ok((bytes, eof)) => {
@@ -175,7 +180,7 @@ where
 {
     let handle = args.fsroot;
     let id = fh_to_id!(context, &handle);
-    match context.vfs.fsinfo(&id).await {
+    match context.vfs.fsinfo(&id, &context.auth).await {
         Ok(fsinfo) => {
             debug!("fsinfo success {xid} --> {fsinfo:?}");
             FSINFO3res::Ok(fsinfo)
@@ -199,7 +204,7 @@ where
     let handle = args.object;
     let mut access = args.access;
     let id = fh_to_id!(context, &handle);
-    let obj_attributes = nfs_option_from_result(context.vfs.getattr(&id).await);
+    let obj_attributes = nfs_option_from_result(context.vfs.getattr(&id, &context.auth).await);
 
     // is this a bug?
     if !matches!(context.vfs.capabilities(), VFSCapabilities::ReadWrite) {
@@ -220,7 +225,7 @@ where
     let handle = args.object;
     debug!("nfsproc3_pathconf({xid}, {handle:?})");
     let id = fh_to_id!(context, &handle);
-    let obj_attr = nfs_option_from_result(context.vfs.getattr(&id).await);
+    let obj_attr = nfs_option_from_result(context.vfs.getattr(&id, &context.auth).await);
 
     let res = PATHCONF3resok {
         obj_attributes: obj_attr,
@@ -242,7 +247,7 @@ where
 {
     let handle = args.fsroot;
     let id = fh_to_id!(context, &handle);
-    let obj_attr = nfs_option_from_result(context.vfs.getattr(&id).await);
+    let obj_attr = nfs_option_from_result(context.vfs.getattr(&id, &context.auth).await);
     let fsstat = FSSTAT3resok {
         obj_attributes: obj_attr,
         tbytes: TEBIBYTE,
@@ -269,7 +274,7 @@ where
     use crate::vfs::ReadDirPlusIterator;
 
     let dirid = fh_to_id!(context, &args.dir);
-    let dir_attr_maybe = context.vfs.getattr(&dirid).await;
+    let dir_attr_maybe = context.vfs.getattr(&dirid, &context.auth).await;
 
     let dir_attributes = dir_attr_maybe.map_or(post_op_attr::None, post_op_attr::Some);
 
@@ -348,7 +353,10 @@ where
     }
     let max_bytes_allowed = args.maxcount as usize - 128;
 
-    let iter = context.vfs.readdirplus(&dirid, args.cookie).await;
+    let iter = context
+        .vfs
+        .readdirplus(&dirid, args.cookie, &context.auth)
+        .await;
 
     if let Err(stat) = iter {
         error!("readdirplus error {xid} --> {stat}");
@@ -417,7 +425,7 @@ where
     use crate::vfs::ReadDirIterator;
 
     let dirid = fh_to_id!(context, &readdir3args.dir);
-    let dir_attr_maybe = context.vfs.getattr(&dirid).await;
+    let dir_attr_maybe = context.vfs.getattr(&dirid, &context.auth).await;
     let dir_attributes = dir_attr_maybe.map_or(post_op_attr::None, post_op_attr::Some);
     let cookieverf = cookieverf3::from_attr(&dir_attributes);
 
@@ -461,7 +469,10 @@ where
     }
     let max_bytes_allowed = readdir3args.count as usize - empty_len;
 
-    let iter = context.vfs.readdir(&dirid, readdir3args.cookie).await;
+    let iter = context
+        .vfs
+        .readdir(&dirid, readdir3args.cookie, &context.auth)
+        .await;
     if let Err(stat) = iter {
         return READDIR3res::Err((
             stat,
@@ -546,7 +557,7 @@ where
 
     match context
         .vfs
-        .write(&id, write3args.offset, &write3args.data)
+        .write(&id, write3args.offset, &write3args.data, &context.auth)
         .await
     {
         Ok(fattr) => {
@@ -601,8 +612,13 @@ where
     };
 
     if matches!(&createhow, createhow3::GUARDED(_)) {
-        if context.vfs.lookup(&dirid, &dirops.name).await.is_ok() {
-            let after = nfs_option_from_result(context.vfs.getattr(&dirid).await);
+        if context
+            .vfs
+            .lookup(&dirid, &dirops.name, &context.auth)
+            .await
+            .is_ok()
+        {
+            let after = nfs_option_from_result(context.vfs.getattr(&dirid, &context.auth).await);
             return CREATE3res::Err((
                 nfsstat3::NFS3ERR_EXIST,
                 CREATE3resfail {
@@ -616,14 +632,14 @@ where
         createhow3::EXCLUSIVE(verf) => {
             let fid = context
                 .vfs
-                .create_exclusive(&dirid, &dirops.name, verf)
+                .create_exclusive(&dirid, &dirops.name, verf, &context.auth)
                 .await;
             (fid, post_op_attr::None)
         }
         createhow3::UNCHECKED(target_attributes) | createhow3::GUARDED(target_attributes) => {
             match context
                 .vfs
-                .create(&dirid, &dirops.name, target_attributes)
+                .create(&dirid, &dirops.name, target_attributes, &context.auth)
                 .await
             {
                 Ok((fid, fattr)) => (Ok(fid), post_op_attr::Some(fattr)),
@@ -632,7 +648,7 @@ where
         }
     };
 
-    let after = nfs_option_from_result(context.vfs.getattr(&dirid).await);
+    let after = nfs_option_from_result(context.vfs.getattr(&dirid, &context.auth).await);
     let dir_wcc = wcc_data { before, after };
 
     match fid {
@@ -688,7 +704,11 @@ where
         }
     }
 
-    match context.vfs.setattr(&id, args.new_attributes).await {
+    match context
+        .vfs
+        .setattr(&id, args.new_attributes, &context.auth)
+        .await
+    {
         Ok(post_op_attr) => {
             debug!("setattr success {xid} --> {post_op_attr:?}");
             SETATTR3res::Ok(SETATTR3resok {
@@ -731,16 +751,20 @@ where
         }
     };
 
-    match context.vfs.remove(&dirid, &args.object.name).await {
+    match context
+        .vfs
+        .remove(&dirid, &args.object.name, &context.auth)
+        .await
+    {
         Ok(()) => {
-            let after = nfs_option_from_result(context.vfs.getattr(&dirid).await);
+            let after = nfs_option_from_result(context.vfs.getattr(&dirid, &context.auth).await);
             debug!("remove success {xid}");
             REMOVE3res::Ok(REMOVE3resok {
                 dir_wcc: wcc_data { before, after },
             })
         }
         Err(stat) => {
-            let after = nfs_option_from_result(context.vfs.getattr(&dirid).await);
+            let after = nfs_option_from_result(context.vfs.getattr(&dirid, &context.auth).await);
             error!("remove error {xid} --> {stat}");
             REMOVE3res::Err((
                 stat,
@@ -785,11 +809,19 @@ where
 
     let result = context
         .vfs
-        .rename(&from_dirid, &args.from.name, &to_dirid, &args.to.name)
+        .rename(
+            &from_dirid,
+            &args.from.name,
+            &to_dirid,
+            &args.to.name,
+            &context.auth,
+        )
         .await;
 
-    let post_from_dir_attr = nfs_option_from_result(context.vfs.getattr(&from_dirid).await);
-    let post_to_dir_attr = nfs_option_from_result(context.vfs.getattr(&to_dirid).await);
+    let post_from_dir_attr =
+        nfs_option_from_result(context.vfs.getattr(&from_dirid, &context.auth).await);
+    let post_to_dir_attr =
+        nfs_option_from_result(context.vfs.getattr(&to_dirid, &context.auth).await);
 
     let fromdir_wcc = wcc_data {
         before: pre_from_dir_attr,
@@ -838,8 +870,11 @@ where
         }
     };
 
-    let result = context.vfs.mkdir(&dirid, &args.where_.name).await;
-    let after = nfs_option_from_result(context.vfs.getattr(&dirid).await);
+    let result = context
+        .vfs
+        .mkdir(&dirid, &args.where_.name, &context.auth)
+        .await;
+    let after = nfs_option_from_result(context.vfs.getattr(&dirid, &context.auth).await);
     let dir_wcc = wcc_data { before, after };
 
     match result {
@@ -888,6 +923,7 @@ where
             &args.where_.name,
             &args.symlink.symlink_data,
             &args.symlink.symlink_attributes,
+            &context.auth,
         )
         .await
     {
@@ -898,7 +934,7 @@ where
                 obj_attributes: post_op_attr::Some(fattr),
                 dir_wcc: wcc_data {
                     before: pre_dir_attr,
-                    after: nfs_option_from_result(context.vfs.getattr(&dirid).await),
+                    after: nfs_option_from_result(context.vfs.getattr(&dirid, &context.auth).await),
                 },
             })
         }
@@ -909,7 +945,9 @@ where
                 SYMLINK3resfail {
                     dir_wcc: wcc_data {
                         before: pre_dir_attr,
-                        after: nfs_option_from_result(context.vfs.getattr(&dirid).await),
+                        after: nfs_option_from_result(
+                            context.vfs.getattr(&dirid, &context.auth).await,
+                        ),
                     },
                 },
             ))
@@ -926,9 +964,9 @@ where
     T: NfsFileSystem,
 {
     let id = fh_to_id!(context, &args.symlink);
-    let symlink_attributes = nfs_option_from_result(context.vfs.getattr(&id).await);
+    let symlink_attributes = nfs_option_from_result(context.vfs.getattr(&id, &context.auth).await);
 
-    match context.vfs.readlink(&id).await {
+    match context.vfs.readlink(&id, &context.auth).await {
         Ok(data) => {
             debug!("readlink success {xid} --> {data:?}");
             READLINK3res::Ok(READLINK3resok {
@@ -954,9 +992,13 @@ async fn get_wcc_attr<T>(
 where
     T: NfsFileSystem,
 {
-    context.vfs.getattr(object_id).await.map(|v| wcc_attr {
-        size: v.size,
-        mtime: v.mtime,
-        ctime: v.ctime,
-    })
+    context
+        .vfs
+        .getattr(object_id, &context.auth)
+        .await
+        .map(|v| wcc_attr {
+            size: v.size,
+            mtime: v.mtime,
+            ctime: v.ctime,
+        })
 }

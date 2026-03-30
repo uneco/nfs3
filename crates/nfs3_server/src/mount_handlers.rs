@@ -85,7 +85,7 @@ where
         return mountres3::Err(mountstat3::MNT3ERR_NOENT);
     };
 
-    match context.vfs.lookup_by_path(path).await {
+    match context.vfs.lookup_by_path(path, &context.auth).await {
         Ok(fileid) => {
             let root = context.file_handle_converter.fh_to_nfs(&fileid);
             let response = mountres3_ok {
