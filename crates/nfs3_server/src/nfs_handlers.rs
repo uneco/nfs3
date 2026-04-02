@@ -136,7 +136,7 @@ where
             })
         }
         Err(stat) => {
-            warn!("lookup error {xid}({:?}) --> {stat}", dirops.name,);
+            debug!("lookup error {xid}({:?}) --> {stat}", dirops.name,);
             LOOKUP3res::Err((stat, LOOKUP3resfail { dir_attributes }))
         }
     }
@@ -206,9 +206,8 @@ where
     let id = fh_to_id!(context, &handle);
     let obj_attributes = nfs_option_from_result(context.vfs.getattr(&id, &context.auth).await);
 
-    // is this a bug?
     if !matches!(context.vfs.capabilities(), VFSCapabilities::ReadWrite) {
-        access &= ACCESS3_READ | ACCESS3_LOOKUP;
+        access &= ACCESS3_READ | ACCESS3_LOOKUP | ACCESS3_EXECUTE;
     }
 
     debug!("access success {xid} --> {access:?}");
