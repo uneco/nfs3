@@ -59,8 +59,9 @@ where
         NFSPROC3_RENAME => handle(context, message, nfsproc3_rename).await,
         NFSPROC3_MKDIR => handle(context, message, nfsproc3_mkdir).await,
         NFSPROC3_SYMLINK => handle(context, message, nfsproc3_symlink).await,
+        NFSPROC3_LINK => handle(context, message, nfsproc3_link).await,
         NFSPROC3_READLINK => handle(context, message, nfsproc3_readlink).await,
-        NFSPROC3_MKNOD | NFSPROC3_LINK | NFSPROC3_COMMIT => {
+        NFSPROC3_MKNOD | NFSPROC3_COMMIT => {
             warn!("Unimplemented message {proc}");
             message.into_error_reply(accept_stat_data::PROC_UNAVAIL)
         }
@@ -948,6 +949,65 @@ where
                             context.vfs.getattr(&dirid, &context.auth).await,
                         ),
                     },
+                },
+            ))
+        }
+    }
+}
+
+async fn nfsproc3_link<T>(
+    context: RPCContext<T>,
+    xid: u32,
+    args: LINK3args<'_>,
+) -> LINK3res
+where
+    T: NfsFileSystem,
+{
+    if !matches!(context.vfs.capabilities(), VFSCapabilities::ReadWrite) {
+        warn!("No write capabilities.");
+        return LINK3res::Err((nfsstat3::NFS3ERR_ROFS, LINK3resfail::default()));
+    }
+
+    let file_id = fh_to_id!(context, &args.file);
+    let link_dirid = fh_to_id!(context, &args.link.dir);
+
+    let pre_linkdir_attr = match get_wcc_attr(&context, &link_dirid).await {
+        Ok(v) => pre_op_attr::Some(v),
+        Err(stat) => {
+            warn!("Cannot stat link directory {xid} --> {stat}");
+            return LINK3res::Err((stat, LINK3resfail::default()));
+        }
+    };
+
+    let result = context
+        .vfs
+        .link(&file_id, &link_dirid, &args.link.name, &context.auth)
+        .await;
+
+    let file_attributes =
+        nfs_option_from_result(context.vfs.getattr(&file_id, &context.auth).await);
+    let post_linkdir_attr =
+        nfs_option_from_result(context.vfs.getattr(&link_dirid, &context.auth).await);
+    let linkdir_wcc = wcc_data {
+        before: pre_linkdir_attr,
+        after: post_linkdir_attr,
+    };
+
+    match result {
+        Ok(()) => {
+            debug!("link success {xid}");
+            LINK3res::Ok(LINK3resok {
+                file_attributes,
+                linkdir_wcc,
+            })
+        }
+        Err(stat) => {
+            error!("link error {xid} --> {stat}");
+            LINK3res::Err((
+                stat,
+                LINK3resfail {
+                    file_attributes,
+                    linkdir_wcc,
                 },
             ))
         }

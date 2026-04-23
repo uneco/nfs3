@@ -301,7 +301,7 @@ pub struct LINK3args<'a> {
     pub link: diropargs3<'a>,
 }
 
-#[derive(Debug, XdrCodec)]
+#[derive(Debug, Default, XdrCodec)]
 pub struct LINK3resfail {
     pub file_attributes: post_op_attr,
     pub linkdir_wcc: wcc_data,

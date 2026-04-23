@@ -303,4 +303,19 @@ pub trait NfsFileSystem: NfsReadFileSystem {
         attr: &sattr3,
         auth: &auth_unix,
     ) -> impl Future<Output = Result<(Self::Handle, fattr3), nfsstat3>> + Send;
+
+    /// Creates a hard link from `link_dirid/link_name` to the file identified
+    /// by `file_id`. If not supported due to readonly file system this should
+    /// return `Err(nfsstat3::NFS3ERR_ROFS)`. If the underlying file system does
+    /// not support hard links at all, return `Err(nfsstat3::NFS3ERR_NOTSUPP)`.
+    fn link<'a>(
+        &self,
+        file_id: &Self::Handle,
+        link_dirid: &Self::Handle,
+        link_name: &filename3<'a>,
+        auth: &auth_unix,
+    ) -> impl Future<Output = Result<(), nfsstat3>> + Send {
+        let _ = (file_id, link_dirid, link_name, auth);
+        async { Err(nfsstat3::NFS3ERR_NOTSUPP) }
+    }
 }
